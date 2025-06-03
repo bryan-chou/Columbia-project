@@ -1,0 +1,345 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Data: Columbia, MO payroll
+URL: https://como.payroll.socrata.com/#!/year/2024/full_time_employees,others/pay1,pay2,pay3,pay4/explore/0-0-0/segment2
+Download time: Mar. 4, 2024
+
+```{r}
+#install.packages("RScocrata")
+#install.packages("readxl")
+
+library(RSocrata)
+library(tidyverse)
+library(readxl)
+```
+
+```{r}
+payroll2023 <- read.csv("data/data2023.csv")
+payroll2024 <- read.csv("data/data2024.csv")
+payroll2022 <- read.csv("data/data2022.csv")
+payroll2021 <- read.csv("data/data2021.csv")
+```
+
+Merging the files after adding a year column:
+```{r}
+payroll2024 <- payroll2024 %>% 
+  mutate(Year = 2024)
+
+payroll2023 <- payroll2023 %>% 
+  mutate(Year = 2023)
+
+payroll2022 <- payroll2022 %>% 
+  mutate(Year = 2022)
+
+payroll2021 <- payroll2021 %>% 
+  mutate(Year = 2021)
+
+payroll <- rbind(payroll2024, payroll2023, payroll2022, payroll2021)
+```
+
+#Assessment
+A row is a payment made to an employee that comes in the form of base pay, overtime pay, benefits and/or others. A payment can come from more than one source. An employee can receive payments from various sources. A check number can point to one payment, or more than one coming from different sources.
+
+1.Standardizing dates
+```{r}
+payroll <- payroll %>% 
+  mutate(new_check_date = ymd_hms(Check.Date), 
+         new_check_date = as.Date(Check.Date))
+
+###LIZ: the two lines inside your mutate() function really do the same thing, so you can pick one, you don't need both.
+```
+
+2.Data types
+5 character columns, followed by five number columns indicating pay and benefits. All data types seem reasonable.
+
+3.Checking N/As
+```{r}
+sum(is.na(payroll))
+```
+
+4. Creating a full_name column
+```{r}
+payroll <- unite(payroll, full_name, First.Name, Last.Name, sep = " ", remove = FALSE, na.rm = FALSE)
+```
+#I realized if two persons have the exact same name, there's a risk of lumping payments relating to them together. However, merging the two columns will make the analysis easier and since the possibility of that happening is relatively low, I decided to mitigate the risk by paying extra attention when analyzing these name columns.
+
+5. Checking the subcategories of payment:
+```{r}
+payroll %>% distinct(Subcategory) %>% arrange(Subcategory)
+```
+
+6. Checking the job titles:
+```{r}
+payroll %>% distinct(Job.Title) %>% arrange(Job.Title)
+```
+
+```{r}
+###LIZ: 
+range(payroll$new_check_date)
+# note that the earliest date is in 2020, this will give you a hint that each year of data is actually October through September, since that's the city's fiscal year. So 2021 is Oct 2020 through Sept 2021. 
+
+range(payroll$Total.Pay)
+# note the negative values, and that one check has a single payment of $427,611.5
+
+range(payroll$Overtime.Pay)
+# again, negative values (documenation helps us understand this somewhat)
+
+range(payroll$Base.Pay)
+
+range(payroll$Other.Pay)
+# there's that single payment of $427,611.5. Let's look into it...
+
+payroll %>% 
+  filter(Total.Pay > 400000 | Other.Pay > 400000)
+```
+
+1. Annual budget
+```{r}
+payroll %>% 
+  group_by(Year) %>% 
+  summarise(budget = sum(Total.Pay))
+```
+
+2.Who are the high earners?
+```{r}
+payroll %>% 
+  filter(Year == 2021) %>% 
+  group_by(full_name) %>% 
+  summarise(total.pay = sum(Total.Pay)) %>% 
+  arrange(total.pay)
+
+payroll %>% 
+  filter(Year == 2022) %>% 
+  group_by(full_name) %>% 
+  summarise(total.pay = sum(Total.Pay)) %>% 
+  arrange(desc(total.pay))
+
+payroll %>% 
+  filter(Year == 2023) %>% 
+  group_by(full_name) %>% 
+  summarise(total.pay = sum(Total.Pay)) %>% 
+  arrange(desc(total.pay))
+
+payroll %>% 
+  filter(Year == 2024) %>% 
+  group_by(full_name) %>% 
+  summarise(total.pay = sum(Total.Pay)) %>% 
+  arrange(desc(total.pay))
+
+###LIZ: one thing to keep in mind here; the city fiscal year is October through September, so calculating pay on the calendar year might be a little bit off (unless employees make the same amount every month). 
+```
+#Many high earners like GEOFFREY JONES, BRIAN RICHENBERGER, and DARRIN ARENDS were the top 3 highest paid employees a year preceding their retirement. Many of them are from either the fire or police departments.
+
+#GEOFFREY JONES was the police chief of Columbia from 2019 to 2023. It makes sense that he was paid less in 2024 than in the previous year because he has just retired (https://www.como.gov/CMS/pressreleases/view.php?id=8457&tbiframe=1). He has served in CPD for more than 24 years. I took a look at (1) the payments made to him in 2024 so far; (2) a breakdown of his wage in 2023, which doubled that of his 2022 wage.
+
+```{r}
+payroll %>% 
+  filter(full_name == "GEOFFREY JONES") %>% 
+  group_by(Year) %>% 
+  summarise(wage = sum(Total.Pay))
+
+payroll %>% 
+  filter(Year == 2022, full_name == "GEOFFREY JONES") %>% 
+  group_by(Subcategory) %>% 
+  summarise(amt = sum(Total.Pay)) %>% 
+  arrange(desc(amt))
+
+payroll %>% 
+  filter(Year == 2023, full_name == "GEOFFREY JONES") %>% 
+  group_by(Subcategory) %>% 
+  summarise(amt = sum(Total.Pay)) %>% 
+  arrange(desc(amt))
+
+payroll %>% 
+  filter(Year == 2024, full_name == "GEOFFREY JONES")
+
+7639.87*12
+
+payroll %>% 
+  filter(Year == 2023) %>% 
+  group_by(full_name) %>% 
+  summarise(total.pay = sum(Total.Pay)) %>% 
+  filter(total.pay > 91678.44) %>% 
+  arrange(desc(total.pay))
+```
+#Mr. Jones would earn $91678.44 as a retiree from the CPD this year (assuming he will be paid $7639.87 every month for the rest of the year). That amount is higher than the wage of around 78% of the employees in 2023.
+
+#Looking at the wage differences, I realized Mr. Jones earned much more in 2023 partially due to his imminent retirement; for example, there's payment in 2023 under the category, DROP LIAB POLICE, which according to the data dictionary, points to his pension fund. But I also noticed the payment under the category PERMANENT POSITIONS increased by around $70,000, so I took a further look.
+```{r}
+payroll %>% 
+  filter(Year == 2022, full_name == "GEOFFREY JONES", Subcategory == "PERMANENT POSITIONS") %>% 
+  arrange(desc(Total.Pay))
+
+payroll %>% 
+  filter(Year == 2023, full_name == "GEOFFREY JONES", Subcategory == "PERMANENT POSITIONS") %>% 
+  arrange(desc(Total.Pay))
+
+```
+#Everything seems normal except in 2023, there are three payments exceeding $10,000. That never happened in 2022. Specifically, the two biggest payments ($46343.23 and $37094.40) were categorized as other pay and were made on the same day, on 2023-08-11. August, 2023 was also the month when Mr. Jones's retirement went into effect, but it's unclear for what purposes these huge one-time payments were made.
+
+3. Cell phone allowance
+```{r}
+payroll %>% 
+  filter(Subcategory == "CELL PHONE ALLOWANCE") %>% 
+  group_by(Year) %>% 
+  summarise(cpa = sum(Total.Pay)) %>% 
+  arrange(desc(cpa))
+```
+##The city spent around $150,000 each year on cell phone allowances, but who were given these allowances?
+
+```{r}
+payroll %>% 
+  filter(Subcategory == "CELL PHONE ALLOWANCE") %>% 
+  group_by(Department) %>% 
+  summarise(cpa = sum(Total.Pay)) %>% 
+  arrange(desc(cpa))
+```
+##Most cell phone allowances were given to the police chief, HD ASSISTANT DIRECTOR, IT MANAGER. Seems reasonable.
+
+4. Step up pay
+```{r}
+payroll %>% 
+  filter(Subcategory == "STEP UP PAY") %>% 
+  group_by(Year) %>% 
+  summarise(sup = sum(Total.Pay)) %>% 
+  arrange(desc(sup))
+```
+#The city has been spending more and more on step up pays since 2021 -- which is likely a problem as the payments are made only when the city needs a person to step up and take on the responsibilities of a higher job before it's filled.
+
+Those who received the most step up pays over the years:
+```{r}
+payroll %>% 
+  filter(Subcategory == "STEP UP PAY") %>% 
+  group_by(Job.Title, Year) %>% 
+  summarise(sup = sum(Total.Pay)) %>% 
+  arrange(desc(sup))
+```
+##A lot of the step up pays were given to the employees in the fire department. It's likely the fire department has difficulty filling high-paying positions.
+
+5. Overtime pay
+Who earn the most in overtime pay?
+```{r}
+payroll %>% 
+  filter(Subcategory == "OVERTIME") %>% 
+  group_by(Job.Title) %>% 
+  summarise(overtime = sum(Total.Pay)) %>% 
+  arrange(desc(overtime))
+
+payroll %>% 
+  filter(Subcategory == "OVERTIME") %>% 
+  group_by(full_name) %>% 
+  summarise(overtime = sum(Total.Pay)) %>% 
+  arrange(desc(overtime))
+
+annual_overtime <- payroll %>% 
+  filter(Subcategory == "OVERTIME") %>% 
+  group_by(Year) %>% 
+  summarise(overtime = sum(Total.Pay)) %>% 
+  arrange(desc(overtime))
+```
+
+I noticed CPOA in two of the job titles that made it to the top 10. I looked further:
+```{r}
+payroll %>% 
+  filter(Job.Title == "POLICE OFFICER - CPOA" | Job.Title == "POLICE SERGEANT - CPOA") %>% 
+  group_by(Year) %>% 
+  summarise(cpoa = sum(Total.Pay)) %>% 
+  arrange(desc(cpoa))
+
+payroll %>% 
+  filter(Job.Title == "POLICE OFFICER - CPOA" | Job.Title == "POLICE SERGEANT - CPOA", Subcategory == "OVERTIME") %>% 
+  group_by(Year) %>% 
+  summarise(cpoa_overtime = sum(Total.Pay)) %>% 
+  arrange(desc(cpoa_overtime))
+
+cpoa_overtime <- payroll %>% 
+  filter(Job.Title == "POLICE OFFICER - CPOA" | Job.Title == "POLICE SERGEANT - CPOA", Subcategory == "OVERTIME") %>% 
+  group_by(Year) %>% 
+  summarise(cpoa_overtime = sum(Total.Pay)) %>% 
+  arrange(desc(cpoa_overtime))
+```
+
+##CPOA possibly means Columbia Police Officers Association.
+```{r}
+left_join(annual_overtime, cpoa_overtime, by=c("Year")) %>% 
+  mutate(pct = cpoa_overtime/overtime)
+```
+##I found a significant increase in the amount of overtime pay allocated to employees related to the CPOA in 2023 -- and judging from the data in 2024, the trend is likely to stay.
+
+I wanted to take a look at the employees who earned the most in overtime pay:
+(1) MARK JENKINS
+```{r}
+payroll %>% 
+  filter(full_name == "MARK JENKINS", Subcategory == "OVERTIME") %>% 
+  arrange(desc(Total.Pay))
+
+payroll %>% 
+  filter(full_name == "MARK JENKINS") %>% 
+  group_by(Year) %>% 
+  summarise(wage = sum(Total.Pay)) %>% 
+  arrange(desc(Year))
+  
+payroll %>% 
+  filter(full_name == "MARK JENKINS", Subcategory == "OVERTIME") %>% 
+  group_by(Year) %>% 
+  summarise(ovt = sum(Total.Pay)) %>% 
+  arrange(desc(Year))
+```
+##MARK JENKINS is a fire captain who has collected more than $113894.22 in overtime pay since 2021 (from line 211). But most of these pays were not distributed under "overtime pay" but "other pay." According to the data dictionary, this can indicate that these payments were from external sources. But who other than the city pays a fire captain for working overtime? It's worth finding out.
+
+(2)MATTHEW AMSINGER
+```{r}
+payroll %>% 
+  filter(full_name == "MATTHEW AMSINGER", Subcategory == "OVERTIME") %>% 
+  arrange(desc(Total.Pay))
+
+payroll %>% 
+  filter(full_name == "MATTHEW AMSINGER") %>% 
+  group_by(Year) %>% 
+  summarise(wage = sum(Total.Pay)) %>% 
+  arrange(desc(Year))
+  
+payroll %>% 
+  filter(full_name == "MATTHEW AMSINGER", Subcategory == "OVERTIME") %>% 
+  group_by(Year) %>% 
+  summarise(ovt = sum(Total.Pay)) %>% 
+  arrange(desc(Year))
+```
+##MATTHEW AMSINGER is an airport safety officer who has earned $100095.47 in overtime pay over the years. Unlike MARK JENKINS, most of his overtime payments were filed under the expected subcategory (i.e. "overtime pay") -- at least partially. Again, it's worth finding out the external sources contributing parts of those payments.
+
+##Interestingly, I backgrounded the two employees and realized both of them don't live in Columbia. They actually live quite far away from Columbia. Not sure if this makes sense.
+
+6.955 workers
+```{r}
+payroll %>% 
+  filter(stringr::str_detect(Job.Title,"955"))
+```
+##These workers are represented by a local chapter of the Laborers' International Union of North America. I wanted to see if these union workers, mostly service and maintanence workers, have been better paid over the years.
+
+```{r}
+df1 <- payroll %>% 
+  filter(stringr::str_detect(Job.Title,"955")) %>% 
+  group_by(Year) %>% 
+  summarise(pay = sum(Total.Pay)) 
+
+library(dplyr)
+###LIZ: dplyr is a part of tidyverse so you shouldn't need to import this separately
+
+df2 <- payroll %>% 
+  filter(stringr::str_detect(Job.Title, "955")) %>% 
+  group_by(Year) %>% 
+  summarise(distinct_employee = n_distinct(full_name))
+
+left_join(df1, df2, by=c("Year")) %>% 
+  mutate(avg = pay/distinct_employee)
+```
+
+##The union has been calling for an increase in wages since last summer and has ratified a new union contract that would go to the city council for a vote, KOMU reports (https://www.komu.com/news/midmissourinews/liuna-local-955-ratifies-new-contract-with-6-pay-increase/article_387f6846-4136-11ee-84f9-2b5a0c7ae449.html). The average wage for 955 workers increased in 2022 but slightly declined in 2023 (Data for 2024 incomplete). 
+
+Summary of findings:
+1. Columbia has been spending more and more on step up pays since 2021. A lot of these pays were given to the employees in the fire department. It's likely that the fire department has difficulty filling high-paying positions.
+2. Despite 955 workers calling for a wage increase, the average wage for these union workers experienced a slight decline in 2023, in contrast to the upward trend observed in the previous year.
+3. The salaries of several high-earning city employees peaked in the year prior to their retirement. Many of them are from the fire or police departments.
